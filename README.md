@@ -8,6 +8,8 @@ Copyright (c) Herb Sutter &#x2022; See [License](LICENSE)
 
 Cppfront is a compiler from an experimental C++ 'syntax 2' (Cpp2) to today's 'syntax 1' (Cpp1), to prove out some concepts, share some ideas, and prototype features that can also be proposed for evolving today's C++.
 
+You can find the current status summary here: **[Cppfront status summary (summer 2026)](https://github.com/hsutter/cppfront/discussions/1450)**
+
 ## Documentation: [available here](https://hsutter.github.io/cppfront/)
 
  - [Installation](https://hsutter.github.io/cppfront/welcome/overview/#how-do-i-get-and-build-cppfront)
