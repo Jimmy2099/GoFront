@@ -1,0 +1,11 @@
+package main
+import "fmt"
+
+func work() {
+    defer fmt.Println("deferred")
+    fmt.Println("body")
+}
+
+func main() {
+    work()
+}

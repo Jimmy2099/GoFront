@@ -1,0 +1,13 @@
+package main
+import "fmt"
+
+func worker(ch chan int, value int) {
+    ch <- value
+}
+
+func main() {
+    ch := make(chan int, 1)
+    go worker(ch, 7)
+    value := <-ch
+    fmt.Println(value)
+}

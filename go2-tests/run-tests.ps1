@@ -1,5 +1,6 @@
 param(
-    [string]$Cxx = "clang++"
+    [string]$Cxx = "clang++",
+    [switch]$SkipCppfrontBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,9 +8,15 @@ $root = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $PSScriptRoot "build"
 New-Item -ItemType Directory -Force -Path $build | Out-Null
 
-Write-Host "Building cppfront with $Cxx..."
-& $Cxx -std=c++20 -I (Join-Path $root "include") (Join-Path $root "source/cppfront.cpp") -o (Join-Path $build "cppfront.exe")
-if ($LASTEXITCODE -ne 0) { throw "Failed to build cppfront" }
+if ($SkipCppfrontBuild) {
+    if (!(Test-Path (Join-Path $build "cppfront.exe"))) { throw "cppfront.exe is required when -SkipCppfrontBuild is used" }
+    Write-Host "Using existing cppfront.exe..."
+}
+else {
+    Write-Host "Building cppfront with $Cxx..."
+    & $Cxx -std=c++20 -I (Join-Path $root "include") (Join-Path $root "source/cppfront.cpp") -o (Join-Path $build "cppfront.exe")
+    if ($LASTEXITCODE -ne 0) { throw "Failed to build cppfront" }
+}
 
 Push-Location $build
 try {
@@ -26,10 +33,47 @@ try {
         Write-Host "PASS  $Name"
     }
 
+    function Invoke-MixedKeywordTest {
+        Copy-Item (Join-Path $PSScriptRoot "mixed_keywords.cpp") mixed_keywords.cpp
+        & .\cppfront.exe mixed_keywords.cpp -go2 -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Mixed keyword translation failed" }
+        if (!(Test-Path mixed_keywords.go2.cpp)) { throw "Default mixed keyword output was not created" }
+
+        $generated = Get-Content -Raw mixed_keywords.go2.cpp
+        if ($generated -notmatch '#include "go2util\.h"') { throw "package was not lowered to the Go2 runtime include" }
+        if ($generated -notmatch '#include <iostream>') { throw 'import "fmt" was not lowered to the fmt include' }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_keywords.go2.cpp -o mixed_keywords.exe
+        if ($LASTEXITCODE -ne 0) { throw "Mixed keyword generated C++ did not compile" }
+
+        $keywords = @(
+            "package", "import", "var", "const", "type", "func",
+            "if", "else", "for", "range", "switch", "case", "default", "fallthrough",
+            "break", "continue", "goto", "return", "defer", "go", "chan", "select",
+            "struct", "interface", "map"
+        )
+        $actual = @(& .\mixed_keywords.exe)
+        if ($actual.Count -ne $keywords.Count) {
+            throw "Mixed keyword test produced $($actual.Count) results instead of $($keywords.Count)"
+        }
+
+        for ($index = 0; $index -lt $keywords.Count; ++$index) {
+            if ($actual[$index] -ne "1") {
+                throw "$($index + 1). $($keywords[$index]) mixed_keywords failed: $($actual[$index])"
+            }
+            Write-Host "$($index + 1). $($keywords[$index]) mixed_keywords pass"
+        }
+    }
+
     Invoke-Go2Test "hello" @("sum 5", "0", "1", "2")
     Invoke-Go2Test "syntax" @("matched", "count 0", "count 1", "once", "done")
     Invoke-Go2Test "interop" @("42")
     Invoke-Go2Test "complex" @("Ada! 15 8 7 32")
+    Invoke-Go2Test "keyword_declarations" @("4")
+    Invoke-Go2Test "keyword_switch" @("12 2 99")
+    Invoke-Go2Test "keyword_defer" @("body", "deferred")
+    Invoke-Go2Test "keyword_channel" @("7")
+    Invoke-Go2Test "keyword_select" @("9")
 
     Copy-Item (Join-Path $PSScriptRoot "mixed.cpp") mixed.cpp
     & .\cppfront.exe mixed.cpp -go2 -quiet
@@ -55,15 +99,20 @@ try {
     }
     Write-Host "PASS  complex Cpp1 + Cpp2 + Go2 mixed .cpp"
 
+    Invoke-MixedKeywordTest
+
     Copy-Item (Join-Path $PSScriptRoot "hello.go2") hello.go
     & .\cppfront.exe hello.go -go2 -output hello-flag.cpp -quiet
     if ($LASTEXITCODE -ne 0) { throw "Explicit Go2 translation failed" }
     Write-Host "PASS  explicit -go2"
 
+    # PowerShell 7 otherwise promotes this expected nonzero native exit to a terminating error.
+    $PSNativeCommandUseErrorActionPreference = $false
     & .\cppfront.exe (Join-Path $PSScriptRoot "unsupported-goroutine.go2") -output unsupported-goroutine.cpp -quiet
-    if ($LASTEXITCODE -eq 0) { throw "Unsupported goroutine syntax was accepted" }
+    $unsupportedExitCode = $LASTEXITCODE
+    if ($unsupportedExitCode -eq 0) { throw "Unsupported anonymous goroutine syntax was accepted" }
     $global:LASTEXITCODE = 0
-    Write-Host "PASS  unsupported goroutine is rejected"
+    Write-Host "PASS  unsupported anonymous goroutine is rejected"
     Write-Host "All Go2 syntax tests passed."
 }
 finally {

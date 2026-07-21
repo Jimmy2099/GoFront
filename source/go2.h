@@ -49,6 +49,9 @@ auto go2_type(std::string_view type) -> std::string
             return "std::map<" + go2_type(type.substr(4, close - 4)) + ", " + go2_type(type.substr(close + 1)) + ">";
         }
     }
+    if (type.starts_with("chan ")) {
+        return "go2::channel<" + go2_type(type.substr(5)) + ">";
+    }
     if (type.starts_with("[")) {
         auto close = type.find(']');
         if (close != std::string_view::npos) {
@@ -86,10 +89,56 @@ auto go2_parameters(std::string_view text) -> std::string
         auto name = go2_trim(parameter.substr(0, space));
         auto type = go2_trim(parameter.substr(space + 1));
         if (!first) { result += ", "; }
-        result += "copy " + std::string{name} + ": " + go2_type(type);
+        result += (type.starts_with("chan ") ? "inout " : "copy ") + std::string{name} + ": " + go2_type(type);
         first = false;
     }
 
+    return result;
+}
+
+auto go2_cpp1_type(std::string_view type) -> std::string
+{
+    type = go2_trim(type);
+    if (type.starts_with("*")) {
+        return go2_cpp1_type(type.substr(1)) + "*";
+    }
+    if (type.starts_with("[]")) {
+        return "std::vector<" + go2_cpp1_type(type.substr(2)) + ">";
+    }
+    if (type.starts_with("map[")) {
+        auto close = type.find(']');
+        if (close != std::string_view::npos) {
+            return "std::map<" + go2_cpp1_type(type.substr(4, close - 4)) + ", " + go2_cpp1_type(type.substr(close + 1)) + ">";
+        }
+    }
+    if (type.starts_with("chan ")) {
+        return "go2::channel<" + go2_cpp1_type(type.substr(5)) + ">";
+    }
+    if (type.starts_with("[")) {
+        auto close = type.find(']');
+        if (close != std::string_view::npos) {
+            return "std::array<" + go2_cpp1_type(type.substr(close + 1)) + ", " + std::string{type.substr(1, close - 1)} + ">";
+        }
+    }
+    return go2_type(type);
+}
+
+auto go2_cpp1_parameters(std::string_view text) -> std::string
+{
+    auto result = std::string{};
+    auto first = true;
+    while (!text.empty()) {
+        auto comma = text.find(',');
+        auto parameter = go2_trim(text.substr(0, comma));
+        text = comma == std::string_view::npos ? std::string_view{} : text.substr(comma + 1);
+        auto space = parameter.find_first_of(" \t");
+        if (space == std::string_view::npos) {
+            continue;
+        }
+        if (!first) { result += ", "; }
+        result += go2_cpp1_type(go2_trim(parameter.substr(space + 1))) + " " + std::string{go2_trim(parameter.substr(0, space))};
+        first = false;
+    }
     return result;
 }
 
@@ -122,7 +171,134 @@ class go2_normalizer
     int  cpp2_brace_depth = 0;
     int  cpp1_brace_depth = 0;
     bool in_go_struct = false;
+    bool in_go_interface = false;
+    bool in_go_select = false;
+    bool in_go_switch = false;
+    bool go_switch_case_open = false;
+    int  go_switch_number = 0;
+    int  go_defer_number = 0;
+    std::string go_switch_expression;
     std::vector<std::string> pointer_names;
+    bool buffer_functions = true;
+    bool buffering_go_function = false;
+    int  go_function_brace_depth = 0;
+    std::vector<std::string> go_function_lines;
+
+    auto go2_brace_delta(std::string_view line) const -> int
+    {
+        auto delta = 0;
+        auto quote = char{};
+        auto escaped = false;
+        for (auto i = size_t{0}; i < line.size(); ++i) {
+            auto const ch = line[i];
+            if (quote != '\0') {
+                if (escaped) {
+                    escaped = false;
+                }
+                else if (ch == '\\') {
+                    escaped = true;
+                }
+                else if (ch == quote) {
+                    quote = '\0';
+                }
+                continue;
+            }
+            if (ch == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+                break;
+            }
+            if (ch == '\'' || ch == '\"') {
+                quote = ch;
+            }
+            else if (ch == '{') {
+                ++delta;
+            }
+            else if (ch == '}') {
+                --delta;
+            }
+        }
+        return delta;
+    }
+
+    auto go2_function_has_goto() const -> bool
+    {
+        return std::any_of(
+            go_function_lines.begin(),
+            go_function_lines.end(),
+            [](std::string const& line) {
+                return go2_trim(line).starts_with("goto ");
+            }
+        );
+    }
+
+    auto go2_cpp1_statement(std::string_view line) const -> std::string
+    {
+        auto const indent = go2_indent(line);
+        auto const code = go2_trim(line);
+        if (code.empty() || code.starts_with("//") || code == "}" || code == "} else {") {
+            return std::string{line};
+        }
+        if (code.ends_with("{") || code.ends_with(":")) {
+            return std::string{line};
+        }
+        if (code.starts_with("goto ") || code.starts_with("return")) {
+            return std::string{indent} + std::string{code} + ";";
+        }
+        if (code.starts_with("var ")) {
+            auto declaration = go2_trim(code.substr(4));
+            auto equal = declaration.find('=');
+            auto left = go2_trim(declaration.substr(0, equal));
+            auto value = equal == std::string_view::npos ? std::string_view{} : go2_trim(declaration.substr(equal + 1));
+            auto space = left.find_first_of(" \t");
+            auto name = space == std::string_view::npos ? left : go2_trim(left.substr(0, space));
+            auto type = space == std::string_view::npos ? std::string{"auto"} : go2_cpp1_type(go2_trim(left.substr(space + 1)));
+            return std::string{indent} + type + " " + std::string{name}
+                + (value.empty() ? std::string{"{};"} : " = " + std::string{value} + ";");
+        }
+        if (code.starts_with("const ")) {
+            auto declaration = go2_trim(code.substr(6));
+            auto equal = declaration.find('=');
+            auto left = go2_trim(declaration.substr(0, equal));
+            auto value = equal == std::string_view::npos ? std::string_view{} : go2_trim(declaration.substr(equal + 1));
+            auto space = left.find_first_of(" \t");
+            auto name = space == std::string_view::npos ? left : go2_trim(left.substr(0, space));
+            auto type = space == std::string_view::npos ? std::string{"auto"} : go2_cpp1_type(go2_trim(left.substr(space + 1)));
+            return std::string{indent} + "const " + type + " " + std::string{name} + " = " + std::string{value} + ";";
+        }
+        if (auto colon_equal = code.find(":="); colon_equal != std::string_view::npos) {
+            return std::string{indent} + "auto " + std::string{go2_trim(code.substr(0, colon_equal))} + " = " + std::string{go2_trim(code.substr(colon_equal + 2))} + ";";
+        }
+        if (code.starts_with("fmt.Println(") && code.ends_with(")")) {
+            return go2_println(indent, code.substr(12, code.size() - 13));
+        }
+        return std::string{indent} + std::string{code} + ";";
+    }
+
+    auto go2_cpp1_function() const -> std::string
+    {
+        assert(!go_function_lines.empty());
+        auto const header = go2_trim(go_function_lines.front());
+        auto const signature = header.substr(5);
+        auto const open = signature.find('(');
+        auto const close = signature.find(')', open);
+        auto const brace = signature.rfind('{');
+        if (open == std::string_view::npos || close == std::string_view::npos || brace == std::string_view::npos) {
+            return {};
+        }
+
+        auto const name = go2_trim(signature.substr(0, open));
+        auto const parameters = signature.substr(open + 1, close - open - 1);
+        auto const result = go2_trim(signature.substr(close + 1, brace - close - 1));
+        auto output = std::string{"auto "} + std::string{name} + "(" + go2_cpp1_parameters(parameters) + ") -> "
+            + (result.empty() ? (name == "main" ? "int" : "void") : go2_cpp1_type(result)) + " {\n";
+
+        for (auto i = size_t{1}; i < go_function_lines.size(); ++i) {
+            output += go2_cpp1_statement(go_function_lines[i]);
+            output += '\n';
+        }
+        return output;
+    }
+
+    auto normalize_buffered_function() -> go2_line;
 
     auto add_pointer_parameters(std::string_view text) -> void
     {
@@ -270,7 +446,7 @@ class go2_normalizer
     }
 
 public:
-    auto normalize(std::string_view line) -> go2_line
+    auto normalize_line(std::string_view line) -> go2_line
     {
         auto const indent = go2_indent(line);
         auto const code = go2_trim(line);
@@ -300,6 +476,61 @@ public:
             }
         }
 
+        if (in_go_interface) {
+            if (code == "}") {
+                in_go_interface = false;
+                return {std::string{indent} + "};", go2_line_kind::cpp2};
+            }
+            auto open = code.find('(');
+            auto close = code.find(')', open);
+            if (open != std::string_view::npos && close != std::string_view::npos) {
+                auto name = go2_trim(code.substr(0, open));
+                auto parameters = code.substr(open + 1, close - open - 1);
+                auto result = go2_trim(code.substr(close + 1));
+                auto return_type = result.empty() ? "void" : go2_type(result);
+                return {std::string{indent} + "virtual " + return_type + " " + std::string{name} + "(" + go2_cpp1_parameters(parameters) + ") = 0;", go2_line_kind::cpp2};
+            }
+        }
+
+        if (in_go_select) {
+            if (code == "}") {
+                in_go_select = false;
+                return {"", go2_line_kind::ignored};
+            }
+            if (code.starts_with("case ") && code.ends_with(":")) {
+                auto receive = go2_trim(code.substr(5, code.size() - 6));
+                auto assign = receive.find(":= <-");
+                if (assign != std::string_view::npos) {
+                    auto name = go2_trim(receive.substr(0, assign));
+                    auto channel = go2_trim(receive.substr(assign + 5));
+                    return {std::string{indent} + std::string{name} + ": _ = " + std::string{channel} + ".receive();", go2_line_kind::cpp2};
+                }
+            }
+        }
+
+        if (in_go_switch) {
+            auto const matched = "go2_switch_matched_" + std::to_string(go_switch_number);
+            auto const fell_through = "go2_switch_fallthrough_" + std::to_string(go_switch_number);
+            if (code == "}") {
+                in_go_switch = false;
+                go_switch_case_open = false;
+                return {std::string{indent} + "}", go2_line_kind::cpp2};
+            }
+            if (code == "fallthrough") {
+                return {std::string{indent} + fell_through + " = true;", go2_line_kind::cpp2};
+            }
+            if ((code.starts_with("case ") && code.ends_with(":")) || code == "default:") {
+                auto condition = std::string{"!"} + matched;
+                if (code != "default:") {
+                    auto value = go2_trim(code.substr(5, code.size() - 6));
+                    condition = "((!" + matched + " && " + go_switch_expression + " == " + std::string{value} + ") || " + fell_through + ")";
+                }
+                auto prefix = go_switch_case_open ? "} " : "";
+                go_switch_case_open = true;
+                return {std::string{indent} + prefix + "if " + condition + " { " + matched + " = true; " + fell_through + " = false;", go2_line_kind::cpp2};
+            }
+        }
+
         if (cpp1_brace_depth > 0) {
             update_cpp1_brace_depth(line);
             return {std::string{line}, go2_line_kind::cpp2};
@@ -318,7 +549,7 @@ public:
             return {std::string{line}, go2_line_kind::cpp2};
         }
         if (code.starts_with("package ")) {
-            return {std::string{indent} + "#include <string>", go2_line_kind::preprocessor};
+            return {std::string{indent} + "#include \"go2util.h\"\n#include <string>", go2_line_kind::preprocessor};
         }
         if (code == "import \"fmt\"") {
             return {std::string{indent} + "#include <iostream>", go2_line_kind::preprocessor};
@@ -328,6 +559,27 @@ public:
             auto name = go2_trim(code.substr(5, code.size() - 13));
             in_go_struct = true;
             return {std::string{indent} + std::string{name} + ": @value type = {", go2_line_kind::cpp2};
+        }
+
+        if (code.starts_with("type ") && code.ends_with(" interface {")) {
+            auto name = go2_trim(code.substr(5, code.size() - 16));
+            in_go_interface = true;
+            return {std::string{indent} + "struct " + std::string{name} + " { virtual ~" + std::string{name} + "() = default;", go2_line_kind::cpp2};
+        }
+
+        if (code.starts_with("switch ") && code.ends_with("{")) {
+            ++go_switch_number;
+            go_switch_expression = std::string{go2_trim(code.substr(7, code.size() - 8))};
+            in_go_switch = true;
+            go_switch_case_open = false;
+            auto const matched = "go2_switch_matched_" + std::to_string(go_switch_number);
+            auto const fell_through = "go2_switch_fallthrough_" + std::to_string(go_switch_number);
+            return {std::string{indent} + matched + ": bool = false; " + fell_through + ": bool = false;", go2_line_kind::cpp2};
+        }
+
+        if (code == "select {") {
+            in_go_select = true;
+            return {"", go2_line_kind::ignored};
         }
 
         if (code.starts_with("func ")) {
@@ -351,6 +603,14 @@ public:
 
         if (code.starts_with("for ")) {
         auto header = go2_trim(code.substr(4));
+        if (auto range = header.find(" := range "); range != std::string_view::npos && header.ends_with("{")) {
+            auto variables = go2_trim(header.substr(0, range));
+            auto comma = variables.find(',');
+            auto value = comma == std::string_view::npos ? variables : go2_trim(variables.substr(comma + 1));
+            auto container = go2_trim(header.substr(range + 10, header.size() - range - 11));
+            return {std::string{indent} + "for " + std::string{container} + " do (copy " + std::string{value} + ") {", go2_line_kind::cpp2};
+        }
+
         if (header == "{") {
             return {std::string{indent} + "while true {", go2_line_kind::cpp2};
         }
@@ -375,6 +635,12 @@ public:
         }
         }
 
+        if (code.starts_with("defer fmt.Println(") && code.ends_with(")")) {
+            auto argument = go2_trim(code.substr(18, code.size() - 19));
+            ++go_defer_number;
+            return {std::string{indent} + "go2_defer_" + std::to_string(go_defer_number) + ": go2::deferred_print = (" + std::string{argument} + ");", go2_line_kind::cpp2};
+        }
+
         if (code.starts_with("var ")) {
         auto declaration = go2_trim(code.substr(4));
         auto equal = declaration.find('=');
@@ -386,15 +652,40 @@ public:
         if (auto container = container_declaration(name, value, indent)) {
             return {*container, go2_line_kind::cpp2};
         }
+
         return {
             std::string{indent} + std::string{name} + ": " + go2_type(type) + (value.empty() ? ";" : " = " + rewrite_pointer_expressions(std::string{value}) + ";"),
             go2_line_kind::cpp2
         };
         }
 
+        if (code.starts_with("const ")) {
+            auto declaration = go2_trim(code.substr(6));
+            auto equal = declaration.find('=');
+            auto left = go2_trim(declaration.substr(0, equal));
+            auto value = equal == std::string_view::npos ? std::string_view{} : go2_trim(declaration.substr(equal + 1));
+            auto space = left.find_first_of(" \t");
+            auto name = space == std::string_view::npos ? left : go2_trim(left.substr(0, space));
+            auto type = space == std::string_view::npos ? std::string_view{"_"} : go2_trim(left.substr(space + 1));
+            return {
+                std::string{indent} + std::string{name} + ": const " + go2_type(type) + " = " + rewrite_pointer_expressions(std::string{value}) + ";",
+                go2_line_kind::cpp2
+            };
+        }
+
         if (auto colon_equal = code.find(":="); colon_equal != std::string_view::npos) {
             auto name = go2_trim(code.substr(0, colon_equal));
             auto value = go2_trim(code.substr(colon_equal + 2));
+            if (value.starts_with("make(chan ") && value.ends_with(")")) {
+                auto arguments = value.substr(10, value.size() - 11);
+                auto comma = arguments.find(',');
+                auto type = go2_trim(arguments.substr(0, comma));
+                auto capacity = comma == std::string_view::npos ? std::string_view{"1"} : go2_trim(arguments.substr(comma + 1));
+                return {std::string{indent} + std::string{name} + ": go2::channel<" + go2_type(type) + "> = (" + std::string{capacity} + ");", go2_line_kind::cpp2};
+            }
+            if (value.starts_with("<-")) {
+                return {std::string{indent} + std::string{name} + ": _ = " + std::string{go2_trim(value.substr(2))} + ".receive();", go2_line_kind::cpp2};
+            }
             if (auto container = container_declaration(name, value, indent)) {
                 return {*container, go2_line_kind::cpp2};
             }
@@ -410,6 +701,18 @@ public:
 
         if (code.starts_with("fmt.Println(") && code.ends_with(")")) {
             return {go2_println(indent, rewrite_pointer_expressions(std::string{code.substr(12, code.size() - 13)})), go2_line_kind::cpp2};
+        }
+        if (code.starts_with("go ") && code.ends_with(")")) {
+            auto call = go2_trim(code.substr(3));
+            auto open = call.find('(');
+            if (open != std::string_view::npos) {
+                auto function = go2_trim(call.substr(0, open));
+                auto arguments = go2_trim(call.substr(open + 1, call.size() - open - 2));
+                return {std::string{indent} + "go2::go_call(" + std::string{function} + (arguments.empty() ? ");" : ", " + std::string{arguments} + ");"), go2_line_kind::cpp2};
+            }
+        }
+        if (auto send = code.find(" <- "); send != std::string_view::npos) {
+            return {std::string{indent} + std::string{go2_trim(code.substr(0, send))} + ".send(" + std::string{go2_trim(code.substr(send + 4))} + ");", go2_line_kind::cpp2};
         }
         if (code.starts_with("return")) {
             return {std::string{indent} + rewrite_pointer_expressions(std::string{code}) + ";", go2_line_kind::cpp2};
@@ -428,7 +731,69 @@ public:
         // Assignment and expression statements in Go are terminated by a newline.
         return {std::string{indent} + rewrite_pointer_expressions(std::string{code}) + ";", go2_line_kind::cpp2};
     }
+
+    explicit go2_normalizer(bool buffer_functions_ = true)
+        : buffer_functions{buffer_functions_}
+    { }
+
+    auto normalize(std::string_view line) -> go2_line
+    {
+        if (!buffer_functions) {
+            return normalize_line(line);
+        }
+
+        auto const code = go2_trim(line);
+        if (buffering_go_function) {
+            go_function_lines.emplace_back(line);
+            go_function_brace_depth += go2_brace_delta(line);
+            if (go_function_brace_depth <= 0) {
+                buffering_go_function = false;
+                return normalize_buffered_function();
+            }
+            return {"", go2_line_kind::ignored};
+        }
+
+        if (
+            code.starts_with("func ")
+            && code.find('(') != std::string_view::npos
+            && code.rfind('{') != std::string_view::npos
+            )
+        {
+            buffering_go_function = true;
+            go_function_brace_depth = go2_brace_delta(line);
+            go_function_lines = {std::string{line}};
+            if (go_function_brace_depth <= 0) {
+                buffering_go_function = false;
+                return normalize_buffered_function();
+            }
+            return {"", go2_line_kind::ignored};
+        }
+
+        return normalize_line(line);
+    }
 };
+
+auto go2_normalizer::normalize_buffered_function() -> go2_line
+{
+    if (go2_function_has_goto()) {
+        // Cpp2 intentionally has no unrestricted goto; preserve Go labels as Cpp1.
+        auto result = go2_cpp1_function();
+        go_function_lines.clear();
+        return {std::move(result), go2_line_kind::cpp2};
+    }
+
+    auto normalizer = go2_normalizer{false};
+    auto result = std::string{};
+    for (auto const& line : go_function_lines) {
+        auto translated = normalizer.normalize(line);
+        if (translated.kind != go2_line_kind::ignored) {
+            result += translated.text;
+        }
+        result += '\n';
+    }
+    go_function_lines.clear();
+    return {std::move(result), go2_line_kind::cpp2};
+}
 
 }
 
