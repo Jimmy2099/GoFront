@@ -29,6 +29,7 @@ try {
     Invoke-Go2Test "hello" @("sum 5", "0", "1", "2")
     Invoke-Go2Test "syntax" @("matched", "count 0", "count 1", "once", "done")
     Invoke-Go2Test "interop" @("42")
+    Invoke-Go2Test "complex" @("Ada! 15 8 7 32")
 
     Copy-Item (Join-Path $PSScriptRoot "mixed.cpp") mixed.cpp
     & .\cppfront.exe mixed.cpp -go2 -quiet
@@ -41,6 +42,18 @@ try {
         throw "Unexpected three-way mixed output: $($mixedOutput -join ', ')"
     }
     Write-Host "PASS  Cpp1 + Cpp2 + Go2 mixed .cpp"
+
+    Copy-Item (Join-Path $PSScriptRoot "mixed_complex.cpp") mixed_complex.cpp
+    & .\cppfront.exe mixed_complex.cpp -go2 -quiet
+    if ($LASTEXITCODE -ne 0) { throw "Complex three-way mixed translation failed" }
+    if (!(Test-Path mixed_complex.go2.cpp)) { throw "Default complex mixed output was not created" }
+    & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_complex.go2.cpp -o mixed_complex.exe
+    if ($LASTEXITCODE -ne 0) { throw "Complex three-way mixed generated C++ did not compile" }
+    $mixedComplexOutput = @(& .\mixed_complex.exe)
+    if ($mixedComplexOutput.Count -ne 1 -or $mixedComplexOutput[0] -ne "Ada! 15 32 | Ada! 15 32 | Ada! 15 32") {
+        throw "Unexpected complex three-way mixed output: $($mixedComplexOutput -join ', ')"
+    }
+    Write-Host "PASS  complex Cpp1 + Cpp2 + Go2 mixed .cpp"
 
     Copy-Item (Join-Path $PSScriptRoot "hello.go2") hello.go
     & .\cppfront.exe hello.go -go2 -output hello-flag.cpp -quiet

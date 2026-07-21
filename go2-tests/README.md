@@ -11,3 +11,7 @@ It builds cppfront, translates each supported-syntax fixture to C++, compiles th
 `interop.go2` verifies that Go2 files still use cppfront's existing mixed-source support: native Cpp2 declarations can appear directly, and a `//go2:cpp1-begin` / `//go2:cpp1-end` region is passed through as Cpp1.
 
 `mixed.cpp` verifies a traditional C++ source file that contains Cpp1, Cpp2, and Go2 together. Run it with `cppfront mixed.cpp -go2`; the generated output is `mixed.go2.cpp` by default.
+
+`complex.go2` covers Go2 structures passed and modified by value and pointer, string fields, slices and fixed arrays with indexed reads/writes, and an empty `map[string]int` populated through subscript assignment.
+
+`mixed_complex.cpp` implements the same complex structure, pointer, container, string, and dictionary operation separately in Cpp1, Cpp2, and Go2, then compares all three results from a Cpp1 `main`.

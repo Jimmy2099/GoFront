@@ -22,7 +22,7 @@ For convenience, you can shorten the name to any unique prefix not shared with a
 
 ### `-go2`
 
-Parse input using the experimental Go-inspired C++ surface syntax. Files ending in `.go2` select this syntax automatically. This is a C++-targeting subset, not a Go implementation: it currently supports `package`, `import "fmt"`, `func`, `var`, `:=`, `if`, and conditional or three-part `for` loops.
+Parse input using the experimental Go-inspired C++ surface syntax. Files ending in `.go2` select this syntax automatically. This is a C++-targeting subset, not a Go implementation: it currently supports `package`, `import "fmt"`, `func`, `type ... struct`, `var`, `:=`, value and pointer parameters, strings, slices, fixed arrays, empty maps, `if`, and conditional or three-part `for` loops.
 
 When `-go2` is used for a traditional `.cpp` file, Cpp1 blocks and Cpp2 declarations are preserved alongside Go2 syntax. The default generated filename is `name.go2.cpp`, so the input file is never overwritten.
 
