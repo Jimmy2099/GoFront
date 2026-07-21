@@ -8,7 +8,7 @@ where
 
 - **options** is optional, and can include options described on this page
 
-- **file ...** is a list of one or more `.cpp2` filenames to be compiled
+- **file ...** is a list of one or more `.cpp2` or `.go2` filenames to be compiled
 
 Command line options are spelled starting with `-` or `/` followed by the option name. For example, `-help` prints help.
 
@@ -19,6 +19,12 @@ For convenience, you can shorten the name to any unique prefix not shared with a
 
 
 ## Basic command line options
+
+### `-go2`
+
+Parse input using the experimental Go-inspired C++ surface syntax. Files ending in `.go2` select this syntax automatically. This is a C++-targeting subset, not a Go implementation: it currently supports `package`, `import "fmt"`, `func`, `var`, `:=`, `if`, and conditional or three-part `for` loops.
+
+When `-go2` is used for a traditional `.cpp` file, Cpp1 blocks and Cpp2 declarations are preserved alongside Go2 syntax. The default generated filename is `name.go2.cpp`, so the input file is never overwritten.
 
 ### `-help`, `-h`, `-?`
 

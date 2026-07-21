@@ -1014,6 +1014,7 @@ struct function_prolog {
 class cppfront
 {
     std::string              sourcefile;
+    input_syntax             syntax = input_syntax::cpp2;
     std::vector<error_entry> errors;
     std::set<std::string>    includes;
     std::vector<std::string> extra_cpp1;
@@ -1174,8 +1175,9 @@ public:
     //
     //  filename    the source file to be processed
     //
-    cppfront(std::string const& filename)
+    cppfront(std::string const& filename, bool force_go2 = false)
         : sourcefile{ filename }
+        , syntax    { force_go2 || filename.ends_with(".go2") ? input_syntax::go2 : input_syntax::cpp2 }
         , source    { errors }
         , tokens    { errors }
         , parser    { errors, includes, extra_cpp1, extra_build, filename }
@@ -1187,6 +1189,8 @@ public:
         if (
             !sourcefile.ends_with(".cpp2")
             && !sourcefile.ends_with(".h2")
+            && !sourcefile.ends_with(".go2")
+            && syntax != input_syntax::go2
             && sourcefile != "stdin"
             )
         {
@@ -1198,7 +1202,7 @@ public:
 
         //  Load the program file into memory
         //
-        else if (!source.load(sourcefile))
+        else if (!source.load(sourcefile, syntax))
         {
             if (errors.empty()) {
                 errors.emplace_back(
@@ -1269,8 +1273,16 @@ public:
         //  Default to stdout if input is stdin
         auto cpp1_filename = std::string{"stdout"};
         if (sourcefile != "stdin") {
-            assert(sourcefile.ends_with("2"));
-            cpp1_filename = sourcefile.substr(0, std::ssize(sourcefile) - 1);
+            if (syntax == input_syntax::go2 && sourcefile.ends_with(".go2")) {
+                cpp1_filename = sourcefile.substr(0, std::ssize(sourcefile) - 4) + ".cpp";
+            }
+            else if (syntax == input_syntax::go2) {
+                cpp1_filename = std::filesystem::path(sourcefile).replace_extension(".go2.cpp").string();
+            }
+            else {
+                assert(sourcefile.ends_with("2"));
+                cpp1_filename = sourcefile.substr(0, std::ssize(sourcefile) - 1);
+            }
         }
         
         //  Use explicit filename override if present, otherwise strip leading path

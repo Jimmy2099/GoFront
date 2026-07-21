@@ -14,11 +14,15 @@
 #define CPP2_IO_H
 
 #include "common.h"
+#include "go2.h"
 #include <fstream>
 #include <cctype>
+#include <sstream>
 
 
 namespace cpp2 {
+
+enum class input_syntax : u8 { cpp2, go2 };
 
 //---------------------------------------------------------------------------
 //  move_next: advances i as long as p(line[i]) is true or the end of line
@@ -888,7 +892,8 @@ public:
     //  source                  program textual representation
     //
     auto load(
-        std::string const&  filename
+        std::string const&  filename,
+        input_syntax        syntax = input_syntax::cpp2
     )
         -> bool
     {
@@ -901,7 +906,40 @@ public:
             fss.open(filename);
             if( !fss.is_open()) { return false; }
         }
-        std::istream& in = is_stdin ? std::cin : fss;
+        std::istream* input = is_stdin ? static_cast<std::istream*>(&std::cin) : static_cast<std::istream*>(&fss);
+        std::stringstream normalized_go2;
+
+        if (syntax == input_syntax::go2)
+        {
+            auto normalizer = go2_normalizer{};
+            while (input->getline(&buf[0], max_line_len)) {
+                auto translated = normalizer.normalize(&buf[0]);
+                if (translated.kind != go2_line_kind::ignored) {
+                    normalized_go2 << translated.text;
+                }
+                normalized_go2 << '\n';
+            }
+
+            if (input->gcount() >= max_line_len-1) {
+                errors.emplace_back(
+                    source_position(lineno_t(std::ssize(lines)), 0),
+                    std::string("source line too long - length must be less than ") + std::to_string(max_line_len)
+                );
+                return false;
+            }
+            if (!input->eof()) {
+                errors.emplace_back(
+                    source_position(lineno_t(std::ssize(lines)), 0),
+                    "unexpected error reading source lines - did not reach EOF",
+                    false,
+                    true
+                );
+                return false;
+            }
+            input = &normalized_go2;
+        }
+
+        std::istream& in = *input;
     
         auto in_comment            = false;
         auto in_string_literal     = false;

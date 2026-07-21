@@ -28,6 +28,14 @@ static cpp2::cmdline_processor::register_flag cmd_quiet(
     []{ flag_quiet = true; }
 );
 
+static auto flag_go2 = false;
+static cpp2::cmdline_processor::register_flag cmd_go2(
+    0,
+    "go2",
+    "Parse input using the Go-inspired C++ surface syntax",
+    []{ flag_go2 = true; }
+);
+
 auto main(
     int   argc,
     char* argv[]
@@ -89,7 +97,7 @@ auto main(
         }
 
         //  Load + lex + parse + sema
-        cppfront c(arg.text);
+        cppfront c(arg.text, flag_go2);
 
         //  Generate Cpp1 (this may catch additional late errors)
         auto count = c.lower_to_cpp1();

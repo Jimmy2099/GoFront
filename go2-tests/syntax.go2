@@ -1,0 +1,33 @@
+package main
+import "fmt"
+
+func printWord(word string) {
+    fmt.Println(word)
+}
+
+func main() {
+    var typed int = 1
+    var inferred = 2
+    total := typed + inferred
+
+    if total == 3 {
+        fmt.Println("matched")
+    } else {
+        fmt.Println("not matched")
+    }
+
+    for total < 5 {
+        total = total + 1
+    }
+
+    for i := 0; i < 2; i++ {
+        fmt.Println("count", i)
+    }
+
+    for {
+        fmt.Println("once")
+        break
+    }
+
+    printWord("done")
+}

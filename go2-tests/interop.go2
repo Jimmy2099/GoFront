@@ -1,0 +1,12 @@
+package main
+#include <iostream>
+
+//go2:cpp1-begin
+auto cppfront_value() -> int {
+    return 42;
+}
+//go2:cpp1-end
+
+main: () -> int = {
+    std::cout << cppfront_value() << "\n";
+}

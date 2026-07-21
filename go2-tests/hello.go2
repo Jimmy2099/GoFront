@@ -1,0 +1,17 @@
+package main
+import "fmt"
+
+func add(a int, b int) int {
+    return a + b
+}
+
+func main() {
+    total := add(2, 3)
+    if total == 5 {
+        fmt.Println("sum", total)
+    }
+
+    for i := 0; i < 3; i++ {
+        fmt.Println(i)
+    }
+}
