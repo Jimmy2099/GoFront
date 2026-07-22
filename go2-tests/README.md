@@ -18,4 +18,6 @@ It builds cppfront, translates each supported-syntax fixture to C++, compiles th
 
 `mixed_complex.cpp` implements the same complex structure, pointer, container, string, and dictionary operation separately in Cpp1, Cpp2, and Go2, then compares all three results from a Cpp1 `main`.
 
+`mixed_keywords_complex.cpp` shares one Cpp1 global workspace across all three languages. The workspace contains nested structures, a structure array, an integer array, and a dictionary. Its call and return path is Cpp1 -> Go2 -> Cpp2 -> Cpp1, with every stage reading and updating the same global data.
+
 `mixed_keywords.cpp` is a traditional `.cpp` file containing Cpp1, Cpp2, and Go2. It executes each of Go's 25 reserved keywords through real syntax, including a native-label fallback for Go2 `goto`, and exercises the Cpp1 -> Go2 -> Cpp2 -> Cpp1 call chain. The test runner reports each keyword as `N. keyword mixed_keywords pass`.

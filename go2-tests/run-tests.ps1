@@ -99,6 +99,18 @@ try {
     }
     Write-Host "PASS  complex Cpp1 + Cpp2 + Go2 mixed .cpp"
 
+    Copy-Item (Join-Path $PSScriptRoot "mixed_keywords_complex.cpp") mixed_keywords_complex.cpp
+    & .\cppfront.exe mixed_keywords_complex.cpp -go2 -quiet
+    if ($LASTEXITCODE -ne 0) { throw "Complex keyword three-way mixed translation failed" }
+    if (!(Test-Path mixed_keywords_complex.go2.cpp)) { throw "Default complex keyword mixed output was not created" }
+    & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_keywords_complex.go2.cpp -o mixed_keywords_complex.exe
+    if ($LASTEXITCODE -ne 0) { throw "Complex keyword mixed generated C++ did not compile" }
+    $mixedKeywordsComplexOutput = @(& .\mixed_keywords_complex.exe)
+    if ($mixedKeywordsComplexOutput.Count -ne 1 -or $mixedKeywordsComplexOutput[0] -ne "cpp1:12 cpp2:25 go2:34 | 12 25 34 | 12 25 34 | 3 | 216") {
+        throw "Unexpected complex keyword mixed output: $($mixedKeywordsComplexOutput -join ', ')"
+    }
+    Write-Host "PASS  complex global Cpp1 -> Go2 -> Cpp2 -> Cpp1 mixed .cpp"
+
     Invoke-MixedKeywordTest
 
     Copy-Item (Join-Path $PSScriptRoot "hello.go2") hello.go
