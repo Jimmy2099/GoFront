@@ -10,9 +10,12 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace go2 {
+
+using uint = std::make_unsigned_t<int>;
 
 class deferred_print {
     std::string value;

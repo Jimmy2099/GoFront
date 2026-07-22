@@ -34,6 +34,38 @@ auto go2_indent(std::string_view text) -> std::string_view
     return first == std::string_view::npos ? std::string_view{} : text.substr(0, first);
 }
 
+auto go2_type(std::string_view type) -> std::string;
+
+auto go2_function_type_parameters(std::string_view text) -> std::string
+{
+    auto result = std::string{};
+    auto index = 0;
+
+    while (!text.empty()) {
+        auto comma = text.find(',');
+        auto parameter = go2_trim(text.substr(0, comma));
+        text = comma == std::string_view::npos ? std::string_view{} : text.substr(comma + 1);
+        if (parameter.empty()) {
+            continue;
+        }
+
+        auto space = parameter.find_first_of(" \t");
+        auto name = space == std::string_view::npos
+            ? "go2_arg" + std::to_string(index)
+            : std::string{go2_trim(parameter.substr(0, space))};
+        auto type = space == std::string_view::npos
+            ? parameter
+            : go2_trim(parameter.substr(space + 1));
+        if (!result.empty()) {
+            result += ", ";
+        }
+        result += name + ": " + go2_type(type);
+        ++index;
+    }
+
+    return result;
+}
+
 auto go2_type(std::string_view type) -> std::string
 {
     type = go2_trim(type);
@@ -58,8 +90,29 @@ auto go2_type(std::string_view type) -> std::string
             return "std::array<" + go2_type(type.substr(close + 1)) + ", " + std::string{type.substr(1, close - 1)} + ">";
         }
     }
+    if (type.starts_with("func(")) {
+        auto close = type.find(')');
+        if (close != std::string_view::npos) {
+            auto result = go2_trim(type.substr(close + 1));
+            return "std::function< (" + go2_function_type_parameters(type.substr(5, close - 5)) + ") -> "
+                + (result.empty() ? "void" : go2_type(result)) + " >";
+        }
+    }
     if (type == "string") { return "std::string"; }
-    if (type == "byte")   { return "unsigned char"; }
+    if (type == "uint8" || type == "byte") { return "u8"; }
+    if (type == "uint16") { return "u16"; }
+    if (type == "uint32") { return "u32"; }
+    if (type == "uint64") { return "u64"; }
+    if (type == "int8")   { return "i8"; }
+    if (type == "int16")  { return "i16"; }
+    if (type == "int32")  { return "i32"; }
+    if (type == "int64")  { return "i64"; }
+    if (type == "float32") { return "float"; }
+    if (type == "float64") { return "double"; }
+    if (type == "complex64") { return "std::complex<float>"; }
+    if (type == "complex128") { return "std::complex<double>"; }
+    if (type == "uint") { return "go2::uint"; }
+    if (type == "uintptr") { return "std::uintptr_t"; }
     if (type == "rune")   { return "char32_t"; }
     return std::string{type};
 }
@@ -558,7 +611,7 @@ public:
         if (code.starts_with("type ") && code.ends_with(" struct {")) {
             auto name = go2_trim(code.substr(5, code.size() - 13));
             in_go_struct = true;
-            return {std::string{indent} + std::string{name} + ": @value type = {", go2_line_kind::cpp2};
+            return {std::string{indent} + std::string{name} + ": @basic_value type = {", go2_line_kind::cpp2};
         }
 
         if (code.starts_with("type ") && code.ends_with(" interface {")) {

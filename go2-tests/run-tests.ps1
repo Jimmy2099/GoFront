@@ -65,6 +65,88 @@ try {
         }
     }
 
+    function Invoke-MixedKeywordComplexTest {
+        Copy-Item (Join-Path $PSScriptRoot "mixed_keywords_complex.cpp") mixed_keywords_complex.cpp
+        & .\cppfront.exe mixed_keywords_complex.cpp -go2 -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Complex keyword three-way mixed translation failed" }
+        if (!(Test-Path mixed_keywords_complex.go2.cpp)) { throw "Default complex keyword mixed output was not created" }
+
+        $generated = Get-Content -Raw mixed_keywords_complex.go2.cpp
+        if ($generated -notmatch '#include "go2util\.h"') { throw "package was not lowered to the Go2 runtime include" }
+        if ($generated -notmatch '#include <iostream>') { throw 'import "fmt" was not lowered to the fmt include' }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_keywords_complex.go2.cpp -o mixed_keywords_complex.exe
+        if ($LASTEXITCODE -ne 0) { throw "Complex keyword mixed generated C++ did not compile" }
+
+        $keywords = @(
+            "package", "import", "var", "const", "type", "func",
+            "if", "else", "for", "range", "switch", "case", "default", "fallthrough",
+            "break", "continue", "goto", "return", "defer", "go", "chan", "select",
+            "struct", "interface", "map"
+        )
+        $languages = @("Cpp1", "Cpp2", "Go2")
+        $rawOutput = @(& .\mixed_keywords_complex.exe)
+        $deferOutput = @($rawOutput | Where-Object { $_ -eq "defer" })
+        $actual = @($rawOutput | Where-Object { $_ -ne "defer" })
+        if ($deferOutput.Count -ne $languages.Count) {
+            throw "Expected $($languages.Count) defer executions, received $($deferOutput.Count)"
+        }
+        if ($actual.Count -ne ($keywords.Count * $languages.Count)) {
+            throw "Mixed keyword complex test produced $($actual.Count) results instead of $($keywords.Count * $languages.Count)"
+        }
+
+        $result = 0
+        for ($keywordIndex = 0; $keywordIndex -lt $keywords.Count; ++$keywordIndex) {
+            for ($languageIndex = 0; $languageIndex -lt $languages.Count; ++$languageIndex) {
+                if ($actual[$result] -ne "1") {
+                    throw "$($result + 1). $($languages[$languageIndex]) $($keywords[$keywordIndex]) mixed_keywords_complex failed: $($actual[$result])"
+                }
+                Write-Host "$($result + 1). $($languages[$languageIndex]) $($keywords[$keywordIndex]) mixed_keywords_complex pass"
+                ++$result
+            }
+        }
+    }
+
+    function Invoke-MixedTypesComplexTest {
+        Copy-Item (Join-Path $PSScriptRoot "mixed_types_complex.cpp") mixed_types_complex.cpp
+        & .\cppfront.exe mixed_types_complex.cpp -go2 -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Three-way Go data type mixed translation failed" }
+        if (!(Test-Path mixed_types_complex.go2.cpp)) { throw "Default Go data type mixed output was not created" }
+
+        $generated = Get-Content -Raw mixed_types_complex.go2.cpp
+        $requiredTypes = @(
+            "go2::uint",
+            "std::uintptr_t",
+            "std::complex<float>",
+            "std::complex<double>",
+            "std::function",
+            "std::array",
+            "std::vector",
+            "std::map",
+            "go2::channel"
+        )
+        foreach ($requiredType in $requiredTypes) {
+            if ($generated -notmatch [regex]::Escape($requiredType)) {
+                throw "Go data type was not lowered to $requiredType"
+            }
+        }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_types_complex.go2.cpp -o mixed_types_complex.exe
+        if ($LASTEXITCODE -ne 0) { throw "Go data type mixed generated C++ did not compile" }
+
+        $languages = @("Cpp1", "Cpp2", "Go2")
+        $actual = @(& .\mixed_types_complex.exe)
+        if ($actual.Count -ne $languages.Count) {
+            throw "Go data type mixed test produced $($actual.Count) results instead of $($languages.Count)"
+        }
+        for ($index = 0; $index -lt $languages.Count; ++$index) {
+            if ($actual[$index] -ne "1") {
+                throw "$($index + 1). $($languages[$index]) mixed_types_complex failed: $($actual[$index])"
+            }
+            Write-Host "$($index + 1). $($languages[$index]) Go data types mixed_types_complex pass"
+        }
+    }
+
     Invoke-Go2Test "hello" @("sum 5", "0", "1", "2")
     Invoke-Go2Test "syntax" @("matched", "count 0", "count 1", "once", "done")
     Invoke-Go2Test "interop" @("42")
@@ -99,17 +181,9 @@ try {
     }
     Write-Host "PASS  complex Cpp1 + Cpp2 + Go2 mixed .cpp"
 
-    Copy-Item (Join-Path $PSScriptRoot "mixed_keywords_complex.cpp") mixed_keywords_complex.cpp
-    & .\cppfront.exe mixed_keywords_complex.cpp -go2 -quiet
-    if ($LASTEXITCODE -ne 0) { throw "Complex keyword three-way mixed translation failed" }
-    if (!(Test-Path mixed_keywords_complex.go2.cpp)) { throw "Default complex keyword mixed output was not created" }
-    & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_keywords_complex.go2.cpp -o mixed_keywords_complex.exe
-    if ($LASTEXITCODE -ne 0) { throw "Complex keyword mixed generated C++ did not compile" }
-    $mixedKeywordsComplexOutput = @(& .\mixed_keywords_complex.exe)
-    if ($mixedKeywordsComplexOutput.Count -ne 1 -or $mixedKeywordsComplexOutput[0] -ne "cpp1:12 cpp2:25 go2:34 | 12 25 34 | 12 25 34 | 3 | 216") {
-        throw "Unexpected complex keyword mixed output: $($mixedKeywordsComplexOutput -join ', ')"
-    }
-    Write-Host "PASS  complex global Cpp1 -> Go2 -> Cpp2 -> Cpp1 mixed .cpp"
+    Invoke-MixedKeywordComplexTest
+
+    Invoke-MixedTypesComplexTest
 
     Invoke-MixedKeywordTest
 
@@ -118,10 +192,26 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Explicit Go2 translation failed" }
     Write-Host "PASS  explicit -go2"
 
-    # PowerShell 7 otherwise promotes this expected nonzero native exit to a terminating error.
-    $PSNativeCommandUseErrorActionPreference = $false
-    & .\cppfront.exe (Join-Path $PSScriptRoot "unsupported-goroutine.go2") -output unsupported-goroutine.cpp -quiet
-    $unsupportedExitCode = $LASTEXITCODE
+    # This fixture must fail translation. Start-Process keeps its expected nonzero
+    # exit from becoming a PowerShell error record while retaining the diagnostic.
+    $unsupportedDiagnostic = Join-Path $build "unsupported-goroutine.stderr"
+    Remove-Item -LiteralPath $unsupportedDiagnostic -Force -ErrorAction SilentlyContinue
+    try {
+        $unsupportedProcess = Start-Process `
+            -FilePath (Join-Path $build "cppfront.exe") `
+            -ArgumentList ('"{0}" -output "unsupported-goroutine.cpp" -quiet' -f (Join-Path $PSScriptRoot "unsupported-goroutine.go2")) `
+            -NoNewWindow `
+            -PassThru `
+            -RedirectStandardError $unsupportedDiagnostic `
+            -Wait
+        $unsupportedExitCode = $unsupportedProcess.ExitCode
+    }
+    finally {
+        if (Test-Path $unsupportedDiagnostic) {
+            Get-Content $unsupportedDiagnostic | ForEach-Object { Write-Host $_ }
+            Remove-Item -LiteralPath $unsupportedDiagnostic -Force
+        }
+    }
     if ($unsupportedExitCode -eq 0) { throw "Unsupported anonymous goroutine syntax was accepted" }
     $global:LASTEXITCODE = 0
     Write-Host "PASS  unsupported anonymous goroutine is rejected"
