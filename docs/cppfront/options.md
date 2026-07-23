@@ -22,7 +22,9 @@ For convenience, you can shorten the name to any unique prefix not shared with a
 
 ### `-go2`
 
-Parse input using the experimental Go-inspired C++ surface syntax. Files ending in `.go2` select this syntax automatically. This is a C++-targeting subset, not a Go implementation: it currently supports `package`, `import "fmt"`, `func`, `type ... struct`, `var`, `:=`, value and pointer parameters, strings, slices, fixed arrays, empty maps, `if`, and conditional or three-part `for` loops.
+Parse input using the experimental Go-inspired C++ surface syntax. Files ending in `.go2` select this syntax automatically. This is a C++-targeting subset, not a Go implementation: it currently supports `package`, `import "fmt"`, `func`, `type ... struct`, the Go2 C++ class extension `type Name class`, `var`, `:=`, value and pointer parameters, strings, slices, fixed arrays, empty maps, `if`, and conditional or three-part `for` loops.
+
+`type Name class { ... }` is Go2's own class syntax and lowers to a native C++ `class`, so it interoperates directly with Cpp1 and Cpp2 types, pointers, and member calls. Its fields use Go2 spelling (`owner string`, `values []int`, `totals map[string]int`). As in Go, an identifier beginning with a lowercase ASCII letter is private (`owner string`, `func apply(...)`), while one beginning with an uppercase ASCII letter is public (`Owner string`, `func Apply(...)`). Within member functions, `this.field` and `pointer.field` lower to C++ `this->field` and `pointer->field`.
 
 When the input is below a `go2.mod` or compatible `go.mod`, cppfront resolves local Go2 packages before translation. See [Go2 modules and packages](go2-modules.md) for manifests, local replacements, vendor dependencies, and `go2.lock`.
 

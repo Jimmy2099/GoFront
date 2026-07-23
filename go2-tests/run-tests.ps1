@@ -147,6 +147,34 @@ try {
         }
     }
 
+    function Invoke-MixedClassesComplexTest {
+        Copy-Item (Join-Path $PSScriptRoot "mixed_classes_complex.cpp") mixed_classes_complex.cpp
+        & .\cppfront.exe mixed_classes_complex.cpp -go2 -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Complex three-way class translation failed" }
+        if (!(Test-Path mixed_classes_complex.go2.cpp)) { throw "Default complex class mixed output was not created" }
+
+        $generated = Get-Content -Raw mixed_classes_complex.go2.cpp
+        foreach ($requiredClassCode in @(
+            "class Go2Ledger {",
+            "private: std::vector<int> entries{};",
+            "public: std::string Owner{};",
+            "private: std::map<std::string, int> totals{};",
+            "public: auto Apply(Cpp2Ledger* cpp2, Cpp1Ledger* cpp1, int delta) -> int"
+        )) {
+            if ($generated -notmatch [regex]::Escape($requiredClassCode)) {
+                throw "Go2 class output is missing: $requiredClassCode"
+            }
+        }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_classes_complex.go2.cpp -o mixed_classes_complex.exe
+        if ($LASTEXITCODE -ne 0) { throw "Complex three-way class generated C++ did not compile" }
+        $actual = @(& .\mixed_classes_complex.exe)
+        if ($actual.Count -ne 1 -or $actual[0] -ne "1 63 63 50 27") {
+            throw "Unexpected complex three-way class output: $($actual -join ', ')"
+        }
+        Write-Host "PASS  complex Cpp1 + Cpp2 + Go2 class mixed .cpp"
+    }
+
     function Invoke-Go2PackageTest {
         $source = Join-Path $PSScriptRoot "packages/app/main.go2"
         & .\cppfront.exe $source -output go2-packages.cpp -quiet
@@ -422,6 +450,8 @@ try {
         throw "Unexpected complex three-way mixed output: $($mixedComplexOutput -join ', ')"
     }
     Write-Host "PASS  complex Cpp1 + Cpp2 + Go2 mixed .cpp"
+
+    Invoke-MixedClassesComplexTest
 
     Invoke-MixedKeywordComplexTest
 

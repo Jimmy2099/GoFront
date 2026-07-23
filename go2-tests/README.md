@@ -22,6 +22,8 @@ Every successful module translation writes a deterministic `go2.lock`. It record
 
 `mixed_complex.cpp` implements the same complex structure, pointer, container, string, and dictionary operation separately in Cpp1, Cpp2, and Go2, then compares all three results from a Cpp1 `main`.
 
+`mixed_classes_complex.cpp` exercises Go2's `type Name class` syntax. The Go2 class has private string, slice, fixed-array, map, and revision state plus exported Go-style `func` member methods; lowercase identifiers are private and uppercase identifiers are public. Cpp1 starts the call, the Go2 class calls Cpp2, and the Cpp2 class calls back into Cpp1. The fixture verifies both native C++ class lowering and Cpp1/Cpp2/Go2 pointer and member-call interoperability.
+
 `mixed_keywords_complex.cpp` runs a 75-case (`Cpp1`, `Cpp2`, and `Go2` entry points for each of Go's 25 reserved keywords) shared-global interoperability matrix. The workspace contains nested structures, a structure array, an integer array, and a dictionary. Each case returns through Go2 -> Cpp2 -> Cpp1, with every stage reading and updating the same global data. The test runner reports `1` through `75` with language, keyword, and `pass`.
 
 `mixed_types_complex.cpp` defines a Go2 structure containing booleans; fixed-width signed and unsigned integers; `byte`, `rune`, `uint`, `uintptr`; floating-point and complex numbers; strings; arrays; slices; maps; and a function value. It also exercises pointer parameters, interfaces, and channels. Cpp1, Cpp2, and Go2 each enter the same Go2 -> Cpp2 -> Cpp1 shared-data call chain, and the runner reports one result for each entry language.
