@@ -175,6 +175,146 @@ try {
         Write-Host "PASS  complex Cpp1 + Cpp2 + Go2 class mixed .cpp"
     }
 
+    function Invoke-MixedOverloadTest {
+        Copy-Item (Join-Path $PSScriptRoot "mixed_overloads.cpp") mixed_overloads.cpp
+        & .\cppfront.exe mixed_overloads.cpp -go2 -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Go2 overload translation failed" }
+        if (!(Test-Path mixed_overloads.go2.cpp)) { throw "Default Go2 overload output was not created" }
+
+        $generated = Get-Content -Raw mixed_overloads.go2.cpp
+        foreach ($requiredOverload in @(
+            "class PrintData {",
+            "public: auto Print(int value) -> std::string",
+            "public: auto Print(double value) -> std::string",
+            "public: auto Print(std::string value) -> std::string",
+            "go2_pick(int value)",
+            "go2_pick(std::string value)",
+            "go2_pick(int left, int right)"
+        )) {
+            if ($generated -notmatch [regex]::Escape($requiredOverload)) {
+                throw "Go2 overload output is missing: $requiredOverload"
+            }
+        }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_overloads.go2.cpp -o mixed_overloads.exe
+        if ($LASTEXITCODE -ne 0) { throw "Go2 overload generated C++ did not compile" }
+        $actual = @(& .\mixed_overloads.exe)
+        if ($actual.Count -ne 1 -or $actual[0] -ne "1 1 1 1 1 1") {
+            throw "Unexpected Go2 overload output: $($actual -join ', ')"
+        }
+        Write-Host "PASS  C++-style Go2 function and class overloads"
+    }
+
+    function Invoke-MixedOperatorOverloadTest {
+        Copy-Item (Join-Path $PSScriptRoot "mixed_operator_overloads.cpp") mixed_operator_overloads.cpp
+        & .\cppfront.exe mixed_operator_overloads.cpp -go2 -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Go2 operator overload translation failed" }
+        if (!(Test-Path mixed_operator_overloads.go2.cpp)) { throw "Default Go2 operator overload output was not created" }
+
+        $generated = Get-Content -Raw mixed_operator_overloads.go2.cpp
+        foreach ($requiredOperatorCode in @(
+            "class Box {",
+            "public: auto operator+(Box other) -> Box",
+            "public: auto operator[](int index) -> int",
+            "public: auto operator()(int factor) -> int",
+            "public: auto operator++() -> int",
+            "public: auto operator+=(OperatorProbe other) -> int",
+            "public: auto operator<(OperatorProbe other) -> bool",
+            "public: auto operator!() -> bool",
+            "private: double length{};",
+            "private: double breadth{};",
+            "private: double height{};"
+        )) {
+            if ($generated -notmatch [regex]::Escape($requiredOperatorCode)) {
+                throw "Go2 operator overload output is missing: $requiredOperatorCode"
+            }
+        }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_operator_overloads.go2.cpp -o mixed_operator_overloads.exe
+        if ($LASTEXITCODE -ne 0) { throw "Go2 operator overload generated C++ did not compile" }
+        $actual = @(& .\mixed_operator_overloads.exe)
+        if ($actual.Count -ne 1 -or $actual[0] -ne "210 1560 5400 1 1 1 1 1 1") {
+            throw "Unexpected Go2 operator overload output: $($actual -join ', ')"
+        }
+        Write-Host "PASS  Go2 class operator+ overload"
+    }
+
+    function Invoke-MixedOperatorMatrixTest {
+        Copy-Item (Join-Path $PSScriptRoot "mixed_operator_matrix.cpp") mixed_operator_matrix.cpp
+        & .\cppfront.exe mixed_operator_matrix.cpp -go2 -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Go2 operator matrix translation failed" }
+        if (!(Test-Path mixed_operator_matrix.go2.cpp)) { throw "Default Go2 operator matrix output was not created" }
+
+        $generated = Get-Content -Raw mixed_operator_matrix.go2.cpp
+        foreach ($requiredOperatorCode in @(
+            "public: auto operator+() -> int",
+            "public: auto operator+(OperatorMatrix other) -> int",
+            "public: auto operator==(",
+            "public: auto operator||(",
+            "public: auto operator&() -> int",
+            "public: auto operator<<=(OperatorMatrix other) -> int",
+            "public: auto operator()(",
+            "public: auto operator[](int index) -> int",
+            "public: auto operator,(OperatorMatrix other) -> int",
+            "public: auto operator->() -> OperatorMatrix*",
+            "public: auto operator new(std::size_t size) -> void*",
+            "public: auto operator delete[](void* pointer) -> void"
+        )) {
+            if ($generated -notmatch [regex]::Escape($requiredOperatorCode)) {
+                throw "Go2 operator matrix output is missing: $requiredOperatorCode"
+            }
+        }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") mixed_operator_matrix.go2.cpp -o mixed_operator_matrix.exe
+        if ($LASTEXITCODE -ne 0) { throw "Go2 operator matrix generated C++ did not compile" }
+        $actual = @(& .\mixed_operator_matrix.exe)
+        $operators = @(
+            "+ binary", "- binary", "* binary", "/", "%",
+            "==", "!=", "<", ">", "<=", ">=",
+            "||", "&&", "!",
+            "+ unary", "- unary", "* unary", "& unary",
+            "++", "--",
+            "|", "& binary", "~", "^", "<<", ">>",
+            "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
+            "()", "[]", ",", "->", "new/delete", "new[]/delete[]"
+        )
+        if ($actual.Count -ne $operators.Count) {
+            throw "Go2 operator matrix produced $($actual.Count) results instead of $($operators.Count)"
+        }
+        for ($index = 0; $index -lt $operators.Count; ++$index) {
+            if ($actual[$index] -ne "1") {
+                throw "$($index + 1). $($operators[$index]) Go2 operator matrix failed: $($actual[$index])"
+            }
+            Write-Host "$($index + 1). $($operators[$index]) Go2 operator matrix pass"
+        }
+    }
+
+    function Invoke-Go2InvalidOperatorTest {
+        $invalidOperators = @(
+            @{ Name = "."; File = "unsupported_operator_dot.cpp" },
+            @{ Name = ".*"; File = "unsupported_operator_member_pointer.cpp" },
+            @{ Name = "->*"; File = "unsupported_operator_arrow_member_pointer.cpp" },
+            @{ Name = "::"; File = "unsupported_operator_scope.cpp" },
+            @{ Name = "sizeof"; File = "unsupported_operator_sizeof.cpp" },
+            @{ Name = "?:"; File = "unsupported_operator_conditional.cpp" },
+            @{ Name = "#"; File = "unsupported_operator_preprocessor.cpp" }
+        )
+
+        foreach ($invalidOperator in $invalidOperators) {
+            Copy-Item (Join-Path $PSScriptRoot $invalidOperator.File) $invalidOperator.File
+            & .\cppfront.exe $invalidOperator.File -go2 -quiet
+            if ($LASTEXITCODE -eq 0) {
+                $output = [IO.Path]::ChangeExtension($invalidOperator.File, ".go2.cpp")
+                & $Cxx -std=c++20 -I (Join-Path $root "include") -fsyntax-only $output
+                if ($LASTEXITCODE -eq 0) {
+                    throw "Go2 accepted the C++-forbidden operator $($invalidOperator.Name)."
+                }
+            }
+            $global:LASTEXITCODE = 0
+            Write-Host "PASS  Go2 forbidden operator $($invalidOperator.Name) is rejected"
+        }
+    }
+
     function Invoke-Go2PackageTest {
         $source = Join-Path $PSScriptRoot "packages/app/main.go2"
         & .\cppfront.exe $source -output go2-packages.cpp -quiet
@@ -452,6 +592,14 @@ try {
     Write-Host "PASS  complex Cpp1 + Cpp2 + Go2 mixed .cpp"
 
     Invoke-MixedClassesComplexTest
+
+    Invoke-MixedOverloadTest
+
+    Invoke-MixedOperatorOverloadTest
+
+    Invoke-MixedOperatorMatrixTest
+
+    Invoke-Go2InvalidOperatorTest
 
     Invoke-MixedKeywordComplexTest
 

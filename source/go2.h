@@ -226,6 +226,7 @@ class go2_normalizer
     bool in_go_struct = false;
     bool in_go_class = false;
     bool in_go_class_method = false;
+    bool rejecting_go_class_method = false;
     int  go_class_method_brace_depth = 0;
     bool in_go_interface = false;
     bool in_go_select = false;
@@ -359,7 +360,19 @@ class go2_normalizer
 
     auto is_go2_exported_identifier(std::string_view name) const -> bool
     {
-        return !name.empty() && std::isupper(static_cast<unsigned char>(name.front()));
+        return name.starts_with("operator")
+            || (!name.empty() && std::isupper(static_cast<unsigned char>(name.front())));
+    }
+
+    auto is_go2_forbidden_operator_name(std::string_view name) const -> bool
+    {
+        return name == "operator."
+            || name == "operator.*"
+            || name == "operator->*"
+            || name == "operator::"
+            || name == "operator sizeof"
+            || name == "operator?:"
+            || name == "operator#";
     }
 
     auto add_go2_class_pointer_parameters(std::string_view text) -> void
@@ -521,6 +534,15 @@ class go2_normalizer
         auto const code = go2_trim(line);
 
         if (in_go_class_method) {
+            if (rejecting_go_class_method) {
+                go_class_method_brace_depth += go2_brace_delta(line);
+                if (go_class_method_brace_depth <= 0) {
+                    in_go_class_method = false;
+                    rejecting_go_class_method = false;
+                    go_class_pointer_names.clear();
+                }
+                return {"", go2_line_kind::ignored};
+            }
             auto const output = go2_class_statement(line);
             go_class_method_brace_depth += go2_brace_delta(line);
             if (go_class_method_brace_depth <= 0) {
@@ -541,22 +563,46 @@ class go2_normalizer
         auto const member = code;
         if (member.starts_with("func ")) {
             auto const signature = member.substr(5);
-            auto const open = signature.find('(');
+            // operator() contains parentheses in its name, so find the parameter list after it.
+            auto const open = signature.starts_with("operator()")
+                ? signature.find('(', std::string_view{"operator()"}.size())
+                : signature.find('(');
             auto const close = signature.find(')', open);
             auto const brace = signature.rfind('{');
             if (open != std::string_view::npos && close != std::string_view::npos && brace != std::string_view::npos) {
                 auto const name = go2_trim(signature.substr(0, open));
                 auto const parameters = signature.substr(open + 1, close - open - 1);
                 auto const result = go2_trim(signature.substr(close + 1, brace - close - 1));
+                if (is_go2_forbidden_operator_name(name)) {
+                    auto const brace_delta = go2_brace_delta(member);
+                    if (brace_delta > 0) {
+                        in_go_class_method = true;
+                        rejecting_go_class_method = true;
+                        go_class_method_brace_depth = brace_delta;
+                    }
+                    return {
+                        std::string{indent} + "#error Go2 cannot overload " + std::string{name},
+                        go2_line_kind::preprocessor
+                    };
+                }
                 add_go2_class_pointer_parameters(parameters);
-                in_go_class_method = true;
-                go_class_method_brace_depth = go2_brace_delta(member);
                 auto const method_access = is_go2_exported_identifier(name) ? "public" : "private";
-                return {
-                    std::string{indent} + method_access + ": auto " + std::string{name} + "(" + go2_cpp1_parameters(parameters) + ") -> "
-                        + (result.empty() ? "void" : go2_cpp1_type(result)) + " {",
-                    go2_line_kind::cpp2
-                };
+                auto const header = std::string{indent} + method_access + ": auto " + std::string{name} + "(" + go2_cpp1_parameters(parameters) + ") -> "
+                    + (result.empty() ? "void" : go2_cpp1_type(result)) + " {";
+                auto const brace_delta = go2_brace_delta(member);
+                if (brace_delta <= 0) {
+                    auto const body = go2_trim(signature.substr(brace + 1, signature.size() - brace - 2));
+                    go_class_pointer_names.clear();
+                    if (body.empty()) {
+                        return {header + " }", go2_line_kind::cpp2};
+                    }
+                    auto const statement = go2_trim(go2_class_statement(std::string{indent} + "    " + std::string{body}));
+                    return {header + " " + std::string{statement} + " }", go2_line_kind::cpp2};
+                }
+
+                in_go_class_method = true;
+                go_class_method_brace_depth = brace_delta;
+                return {header, go2_line_kind::cpp2};
             }
         }
 
@@ -866,6 +912,7 @@ public:
         }
 
         if (code.starts_with("func ")) {
+        // Keep the declared name unchanged so Cppfront builds a normal C++ overload set.
         auto signature = code.substr(5);
         auto open = signature.find('(');
         auto close = signature.find(')', open);
