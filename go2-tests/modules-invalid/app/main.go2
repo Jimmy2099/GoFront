@@ -1,0 +1,6 @@
+package main
+
+import "example.com/go2-remote-lib/answer"
+
+func main() {
+}

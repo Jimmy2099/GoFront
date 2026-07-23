@@ -15,6 +15,7 @@
 
 #include "common.h"
 #include "go2.h"
+#include "go2_module.h"
 #include <fstream>
 #include <cctype>
 #include <sstream>
@@ -911,32 +912,42 @@ public:
 
         if (syntax == input_syntax::go2)
         {
-            auto normalizer = go2_normalizer{};
-            while (input->getline(&buf[0], max_line_len)) {
-                auto translated = normalizer.normalize(&buf[0]);
-                if (translated.kind != go2_line_kind::ignored) {
-                    normalized_go2 << translated.text;
+            auto module_source = go2_module_loader{errors}.load(filename);
+            if (module_source.handled) {
+                if (!module_source.success) {
+                    return false;
                 }
-                normalized_go2 << '\n';
+                normalized_go2 << module_source.text;
+                input = &normalized_go2;
             }
+            else {
+                auto normalizer = go2_normalizer{};
+                while (input->getline(&buf[0], max_line_len)) {
+                    auto translated = normalizer.normalize(&buf[0]);
+                    if (translated.kind != go2_line_kind::ignored) {
+                        normalized_go2 << translated.text;
+                    }
+                    normalized_go2 << '\n';
+                }
 
-            if (input->gcount() >= max_line_len-1) {
-                errors.emplace_back(
-                    source_position(lineno_t(std::ssize(lines)), 0),
-                    std::string("source line too long - length must be less than ") + std::to_string(max_line_len)
-                );
-                return false;
+                if (input->gcount() >= max_line_len-1) {
+                    errors.emplace_back(
+                        source_position(lineno_t(std::ssize(lines)), 0),
+                        std::string("source line too long - length must be less than ") + std::to_string(max_line_len)
+                    );
+                    return false;
+                }
+                if (!input->eof()) {
+                    errors.emplace_back(
+                        source_position(lineno_t(std::ssize(lines)), 0),
+                        "unexpected error reading source lines - did not reach EOF",
+                        false,
+                        true
+                    );
+                    return false;
+                }
+                input = &normalized_go2;
             }
-            if (!input->eof()) {
-                errors.emplace_back(
-                    source_position(lineno_t(std::ssize(lines)), 0),
-                    "unexpected error reading source lines - did not reach EOF",
-                    false,
-                    true
-                );
-                return false;
-            }
-            input = &normalized_go2;
         }
 
         std::istream& in = *input;

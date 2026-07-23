@@ -1,0 +1,19 @@
+package geometry
+
+import "example.com/go2-math/arith"
+
+type Rectangle struct {
+    ledger arith.Ledger
+    factor int
+}
+
+func New(left int, right int) Rectangle {
+    rectangle := Rectangle{}
+    rectangle.ledger = arith.Build(left, right)
+    rectangle.factor = 2
+    return rectangle
+}
+
+func Area(rectangle Rectangle) int {
+    return arith.Score(rectangle.ledger) * rectangle.factor
+}

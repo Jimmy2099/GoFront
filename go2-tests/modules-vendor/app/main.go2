@@ -1,0 +1,10 @@
+package main
+
+import (
+    "fmt"
+    "example.com/go2-vendor-lib/tiny"
+)
+
+func main() {
+    fmt.Println(tiny.Value(5))
+}

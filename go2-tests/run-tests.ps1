@@ -147,6 +147,239 @@ try {
         }
     }
 
+    function Invoke-Go2PackageTest {
+        $source = Join-Path $PSScriptRoot "packages/app/main.go2"
+        & .\cppfront.exe $source -output go2-packages.cpp -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Go2 package project translation failed" }
+        if (!(Test-Path go2-packages.cpp)) { throw "Go2 package project output was not created" }
+
+        $generated = Get-Content -Raw go2-packages.cpp
+        foreach ($requiredNamespace in @(
+            "namespace go2pkg_example_2e_com_2f_go2_2d_packages_2f_calc",
+            "namespace calc = go2pkg_example_2e_com_2f_go2_2d_packages_2f_calc",
+            "namespace score = go2pkg_example_2e_com_2f_go2_2d_packages_2f_labels"
+        )) {
+            if ($generated -notmatch [regex]::Escape($requiredNamespace)) {
+                throw "Go2 package namespace was not emitted: $requiredNamespace"
+            }
+        }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") go2-packages.cpp -o go2-packages.exe
+        if ($LASTEXITCODE -ne 0) { throw "Go2 package project generated C++ did not compile" }
+        $actual = @(& .\go2-packages.exe)
+        if ($actual.Count -ne 1 -or $actual[0] -ne "5 60") {
+            throw "Unexpected Go2 package project output: $($actual -join ', ')"
+        }
+        $lock = Join-Path $PSScriptRoot "packages/go2.lock"
+        if (!(Test-Path $lock) -or (Get-Content -Raw $lock) -notmatch [regex]::Escape('path = "example.com/go2-packages"')) {
+            throw "Go2 package project did not create its lock file"
+        }
+        Write-Host "PASS  Go2 module package imports"
+    }
+
+    function Invoke-Go2PackageFailureTest {
+        $source = Join-Path $PSScriptRoot "packages-invalid/app/main.go2"
+        $diagnostic = Join-Path $build "go2-package-import.stderr"
+        Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
+        try {
+            $process = Start-Process `
+                -FilePath (Join-Path $build "cppfront.exe") `
+                -ArgumentList ('"{0}" -output "go2-packages-invalid.cpp" -quiet' -f $source) `
+                -NoNewWindow `
+                -PassThru `
+                -RedirectStandardError $diagnostic `
+                -Wait
+            if ($process.ExitCode -eq 0) {
+                throw "Missing Go2 package import was accepted"
+            }
+            $message = Get-Content -Raw $diagnostic
+            if ($message -notmatch "could not resolve package directory") {
+                throw "Unexpected missing Go2 package diagnostic: $message"
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "PASS  missing Go2 package import is rejected"
+    }
+
+    function Invoke-Go2CrossModuleTest {
+        $source = Join-Path $PSScriptRoot "modules-cross/app/main.go2"
+        & .\cppfront.exe $source -output go2-cross-module.cpp -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Cross-module Go2 translation failed" }
+        if (!(Test-Path go2-cross-module.cpp)) { throw "Cross-module Go2 output was not created" }
+
+        $generated = Get-Content -Raw go2-cross-module.cpp
+        foreach ($requiredNamespace in @(
+            "namespace arith = go2pkg_example_2e_com_2f_go2_2d_math_2f_arith",
+            "namespace geometry = go2pkg_example_2e_com_2f_go2_2d_shapes_2f_geometry",
+            "namespace metrics = go2pkg_example_2e_com_2f_go2_2d_metrics_2f_values",
+            "namespace numbers = go2pkg_example_2e_com_2f_go2_2d_numbers_2f_values",
+            "cpp1_shift",
+            "cpp2_double"
+        )) {
+            if ($generated -notmatch [regex]::Escape($requiredNamespace)) {
+                throw "Cross-module Go2 output is missing: $requiredNamespace"
+            }
+        }
+
+        & $Cxx -std=c++20 -I (Join-Path $root "include") go2-cross-module.cpp -o go2-cross-module.exe
+        if ($LASTEXITCODE -ne 0) { throw "Cross-module Go2 generated C++ did not compile" }
+        $actual = @(& .\go2-cross-module.exe)
+        if ($actual.Count -ne 1 -or $actual[0] -ne "56 28 3 103") {
+            throw "Unexpected cross-module Go2 output: $($actual -join ', ')"
+        }
+
+        $lock = Join-Path $PSScriptRoot "modules-cross/app/go2.lock"
+        if (!(Test-Path $lock)) { throw "Cross-module Go2 lock file was not created" }
+        $lockBefore = Get-Content -Raw $lock
+        foreach ($requiredEntry in @(
+            'path = "example.com/go2-module-app"',
+            'path = "example.com/go2-math"',
+            'path = "example.com/go2-metrics"',
+            'path = "example.com/go2-numbers"',
+            'path = "example.com/go2-shapes"',
+            'version = "v1.2.0"',
+            'source = "replace:../metrics"',
+            'source = "replace:../numbers"'
+        )) {
+            if ($lockBefore -notmatch [regex]::Escape($requiredEntry)) {
+                throw "Cross-module Go2 lock file is missing: $requiredEntry"
+            }
+        }
+
+        & .\cppfront.exe $source -output go2-cross-module-repeat.cpp -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Cross-module Go2 repeat translation failed" }
+        $lockAfter = Get-Content -Raw $lock
+        if ($lockBefore -cne $lockAfter) { throw "Cross-module Go2 lock file was not deterministic" }
+        Write-Host "PASS  Go2 require + replace + transitive version resolution"
+    }
+
+    function Invoke-Go2VendorModuleTest {
+        $source = Join-Path $PSScriptRoot "modules-vendor/app/main.go2"
+        & .\cppfront.exe $source -output go2-vendor.cpp -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Vendored Go2 translation failed" }
+        & $Cxx -std=c++20 -I (Join-Path $root "include") go2-vendor.cpp -o go2-vendor.exe
+        if ($LASTEXITCODE -ne 0) { throw "Vendored Go2 generated C++ did not compile" }
+        $actual = @(& .\go2-vendor.exe)
+        if ($actual.Count -ne 1 -or $actual[0] -ne "15") {
+            throw "Unexpected vendored Go2 output: $($actual -join ', ')"
+        }
+        $lock = Get-Content -Raw (Join-Path $PSScriptRoot "modules-vendor/app/go2.lock")
+        if ($lock -notmatch [regex]::Escape('source = "vendor"')) {
+            throw "Vendored Go2 lock file did not record the vendor source"
+        }
+        Write-Host "PASS  Go2 vendored module imports"
+    }
+
+    function Invoke-Go2ManifestDirectiveTest {
+        $source = Join-Path $PSScriptRoot "modules-manifest/app/main.go2"
+        & .\cppfront.exe $source -output go2-manifest.cpp -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Go2 manifest directive translation failed" }
+        & $Cxx -std=c++20 -I (Join-Path $root "include") go2-manifest.cpp -o go2-manifest.exe
+        if ($LASTEXITCODE -ne 0) { throw "Go2 manifest directive generated C++ did not compile" }
+        $actual = @(& .\go2-manifest.exe)
+        if ($actual.Count -ne 1 -or $actual[0] -ne "21") {
+            throw "Unexpected Go2 manifest directive output: $($actual -join ', ')"
+        }
+        $lock = Get-Content -Raw (Join-Path $PSScriptRoot "modules-manifest/app/go2.lock")
+        if ($lock -notmatch [regex]::Escape('path = "example.com/go2-manifest-lib"')) {
+            throw "Go2 manifest directive lock file was not created"
+        }
+        Write-Host "PASS  Go2 grouped manifest directives"
+    }
+
+    function Invoke-Go2ExcludedModuleFailureTest {
+        $source = Join-Path $PSScriptRoot "modules-exclude/app/main.go2"
+        $diagnostic = Join-Path $build "go2-excluded-module.stderr"
+        Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
+        try {
+            $process = Start-Process `
+                -FilePath (Join-Path $build "cppfront.exe") `
+                -ArgumentList ('"{0}" -output "go2-excluded-module.cpp" -quiet' -f $source) `
+                -NoNewWindow `
+                -PassThru `
+                -RedirectStandardError $diagnostic `
+                -Wait
+            if ($process.ExitCode -eq 0) {
+                throw "Excluded Go2 module version was accepted"
+            }
+            $message = Get-Content -Raw $diagnostic
+            if ($message -notmatch "is excluded by") {
+                throw "Unexpected excluded Go2 module diagnostic: $message"
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "PASS  Go2 excluded module version is rejected"
+    }
+
+    function Invoke-Go2ModuleMixedSourceTest {
+        $source = Join-Path $PSScriptRoot "modules-cross/app/mixed/main.cpp"
+        $lockPath = Join-Path $PSScriptRoot "modules-cross/app/go2.lock"
+        $lockBefore = Get-Content -Raw $lockPath
+        & .\cppfront.exe $source -go2 -output go2-module-mixed.cpp -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Mixed Go2 module translation failed" }
+        $generated = Get-Content -Raw go2-module-mixed.cpp
+        foreach ($requiredSymbol in @(
+            "namespace arith = go2pkg_example_2e_com_2f_go2_2d_math_2f_arith",
+            "cpp1_seed",
+            "cpp2_factor",
+            "go2_apply"
+        )) {
+            if ($generated -notmatch [regex]::Escape($requiredSymbol)) {
+                throw "Mixed Go2 module output is missing: $requiredSymbol"
+            }
+        }
+        & $Cxx -std=c++20 -I (Join-Path $root "include") go2-module-mixed.cpp -o go2-module-mixed.exe
+        if ($LASTEXITCODE -ne 0) { throw "Mixed Go2 module generated C++ did not compile" }
+        $actual = @(& .\go2-module-mixed.exe)
+        if ($actual.Count -ne 1 -or $actual[0] -ne "56") {
+            throw "Unexpected mixed Go2 module output: $($actual -join ', ')"
+        }
+        if ($lockBefore -cne (Get-Content -Raw $lockPath)) {
+            throw "Mixed Go2 module entry changed the module lock file"
+        }
+
+        $plainSource = Join-Path $PSScriptRoot "modules-cross/app/mixed/plain.cpp"
+        & .\cppfront.exe $plainSource -go2 -output go2-module-plain.cpp -quiet
+        if ($LASTEXITCODE -ne 0) { throw "Plain C++ module translation regressed" }
+        & $Cxx -std=c++20 -I (Join-Path $root "include") go2-module-plain.cpp -o go2-module-plain.exe
+        if ($LASTEXITCODE -ne 0) { throw "Plain C++ module generated C++ did not compile" }
+        $plainActual = @(& .\go2-module-plain.exe)
+        if ($plainActual.Count -ne 1 -or $plainActual[0] -ne "8") {
+            throw "Unexpected plain C++ module output: $($plainActual -join ', ')"
+        }
+        Write-Host "PASS  Cpp1 + Cpp2 + Go2 module entry"
+    }
+
+    function Invoke-Go2RemoteModuleFailureTest {
+        $source = Join-Path $PSScriptRoot "modules-invalid/app/main.go2"
+        $diagnostic = Join-Path $build "go2-remote-module.stderr"
+        Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
+        try {
+            $process = Start-Process `
+                -FilePath (Join-Path $build "cppfront.exe") `
+                -ArgumentList ('"{0}" -output "go2-remote-module.cpp" -quiet' -f $source) `
+                -NoNewWindow `
+                -PassThru `
+                -RedirectStandardError $diagnostic `
+                -Wait
+            if ($process.ExitCode -eq 0) {
+                throw "Remote Go2 module import was accepted"
+            }
+            $message = Get-Content -Raw $diagnostic
+            if ($message -notmatch "remote downloads are disabled") {
+                throw "Unexpected remote Go2 module diagnostic: $message"
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $diagnostic -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "PASS  Go2 remote module import is rejected"
+    }
+
     Invoke-Go2Test "hello" @("sum 5", "0", "1", "2")
     Invoke-Go2Test "syntax" @("matched", "count 0", "count 1", "once", "done")
     Invoke-Go2Test "interop" @("42")
@@ -156,6 +389,15 @@ try {
     Invoke-Go2Test "keyword_defer" @("body", "deferred")
     Invoke-Go2Test "keyword_channel" @("7")
     Invoke-Go2Test "keyword_select" @("9")
+
+    Invoke-Go2PackageTest
+    Invoke-Go2PackageFailureTest
+    Invoke-Go2CrossModuleTest
+    Invoke-Go2VendorModuleTest
+    Invoke-Go2ManifestDirectiveTest
+    Invoke-Go2ModuleMixedSourceTest
+    Invoke-Go2ExcludedModuleFailureTest
+    Invoke-Go2RemoteModuleFailureTest
 
     Copy-Item (Join-Path $PSScriptRoot "mixed.cpp") mixed.cpp
     & .\cppfront.exe mixed.cpp -go2 -quiet

@@ -1,0 +1,10 @@
+package main
+
+import (
+    "fmt"
+    "example.com/go2-manifest-lib/answer"
+)
+
+func main() {
+    fmt.Println(answer.Value())
+}

@@ -1,0 +1,6 @@
+package main
+
+import "example.com/go2-invalid/missing"
+
+func main() {
+}

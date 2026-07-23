@@ -1,0 +1,7 @@
+package labels
+
+import "example.com/go2-packages/calc"
+
+func Weighted(pair calc.Pair) int {
+    return calc.Shifted(pair) * 10
+}

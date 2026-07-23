@@ -1,0 +1,36 @@
+package arith
+
+import "example.com/go2-numbers/values"
+
+type Ledger struct {
+    values []int
+    labels map[string]int
+}
+
+//go2:cpp1-begin
+auto cpp1_shift(int value) -> int {
+    return value + 1;
+}
+//go2:cpp1-end
+
+cpp2_double: (copy value: int) -> int = {
+    return value * 2;
+}
+
+func Build(left int, right int) Ledger {
+    ledger := Ledger{}
+    items := []int{values.Add(left, right), right}
+    labels := map[string]int{}
+    ledger.values = items
+    ledger.labels = labels
+    ledger.labels["sum"] = ledger.values[0]
+    return ledger
+}
+
+func Sum(ledger Ledger) int {
+    return ledger.values[0] + ledger.values[1] + ledger.labels["sum"]
+}
+
+func Score(ledger Ledger) int {
+    return cpp2_double(cpp1_shift(Sum(ledger)))
+}

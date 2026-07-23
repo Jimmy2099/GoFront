@@ -1,0 +1,24 @@
+package calc
+
+type Pair struct {
+    left int
+    right int
+}
+
+//go2:cpp1-begin
+auto cpp1_offset(int value) -> int {
+    return value + 1;
+}
+//go2:cpp1-end
+
+func Sum(pair Pair) int {
+    return pair.left + pair.right
+}
+
+func Scale(pair Pair, factor int) int {
+    return Sum(pair) * factor
+}
+
+func Shifted(pair Pair) int {
+    return cpp1_offset(Sum(pair))
+}

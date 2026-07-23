@@ -1,0 +1,14 @@
+package main
+
+import (
+    "fmt"
+    "example.com/go2-packages/calc"
+    score "example.com/go2-packages/labels"
+)
+
+func main() {
+    pair := calc.Pair{}
+    pair.left = 2
+    pair.right = 3
+    fmt.Println(calc.Sum(pair), score.Weighted(pair))
+}

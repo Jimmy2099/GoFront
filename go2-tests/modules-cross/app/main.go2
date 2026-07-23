@@ -1,0 +1,16 @@
+package main
+
+import (
+    "fmt"
+    "example.com/go2-math/arith"
+    metrics "example.com/go2-metrics/values"
+    numbers "example.com/go2-numbers/values"
+    "example.com/go2-shapes/geometry"
+)
+
+func main() {
+    rectangle := geometry.New(2, 3)
+    numberTotal := numbers.Add(1, 2)
+    metricTotal := metrics.Add(1, 2)
+    fmt.Println(geometry.Area(rectangle), arith.Score(rectangle.ledger), numberTotal, metricTotal)
+}

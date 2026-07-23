@@ -21,6 +21,7 @@
 *.opendb
 *.vsidx
 *.lock
+!go2.lock
 .editorconfig
 *.xml
 *.sarif
